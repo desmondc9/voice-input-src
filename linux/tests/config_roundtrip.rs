@@ -22,6 +22,8 @@ fn save_creates_parent_directories() {
     let dir = tempfile::tempdir().expect("tempdir");
     let nested = dir.path().join("a").join("b").join("c").join("config.toml");
 
-    Config::default().save_to(&nested).expect("save creates parents");
+    Config::default()
+        .save_to(&nested)
+        .expect("save creates parents");
     assert!(nested.exists());
 }

@@ -63,15 +63,30 @@ mod tests {
 
     #[test]
     fn kind_mapping_is_exhaustive() {
-        assert_eq!(AppError::NoMicrophone("x".into()).kind(), ErrorKind::NoMicrophone);
         assert_eq!(
-            AppError::ModelMissing { path: "/tmp/x".into() }.kind(),
+            AppError::NoMicrophone("x".into()).kind(),
+            ErrorKind::NoMicrophone
+        );
+        assert_eq!(
+            AppError::ModelMissing {
+                path: "/tmp/x".into()
+            }
+            .kind(),
             ErrorKind::ModelMissing
         );
-        assert_eq!(AppError::WhisperFailed("x".into()).kind(), ErrorKind::WhisperFailed);
+        assert_eq!(
+            AppError::WhisperFailed("x".into()).kind(),
+            ErrorKind::WhisperFailed
+        );
         assert_eq!(AppError::PortalRevoked.kind(), ErrorKind::PortalRevoked);
-        assert_eq!(AppError::YdotoolMissing("x".into()).kind(), ErrorKind::YdotoolMissing);
-        assert_eq!(AppError::NetworkError("x".into()).kind(), ErrorKind::NetworkError);
+        assert_eq!(
+            AppError::YdotoolMissing("x".into()).kind(),
+            ErrorKind::YdotoolMissing
+        );
+        assert_eq!(
+            AppError::NetworkError("x".into()).kind(),
+            ErrorKind::NetworkError
+        );
         assert_eq!(AppError::Config("x".into()).kind(), ErrorKind::Config);
         let io = AppError::Io(std::io::Error::new(std::io::ErrorKind::NotFound, "x"));
         assert_eq!(io.kind(), ErrorKind::Io);
