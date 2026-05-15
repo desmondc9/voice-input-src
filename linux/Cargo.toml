@@ -9,14 +9,21 @@ description = "Wayland-native voice input — hold-to-talk speech-to-text"
 
 [dependencies]
 anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+cpal = "0.15"
+crossbeam-channel = "0.5"
 directories = "5"
+hound = "3"
 ksni = { version = "0.3", features = ["tokio"] }
+rubato = "0.16"
 serde = { version = "1", features = ["derive"] }
 thiserror = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "signal"] }
 toml = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+voice_activity_detector = "0.2"
+whisper-rs = "0.14"
 
 [dev-dependencies]
 tempfile = "3"
