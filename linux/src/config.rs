@@ -33,7 +33,7 @@ impl Default for Config {
 
 impl Config {
     pub fn config_path() -> AppResult<PathBuf> {
-        let dirs = directories::ProjectDirs::from("com", "yetone", "VoiceInput")
+        let dirs = directories::ProjectDirs::from("com", "yetone", "voice-input")
             .ok_or_else(|| AppError::Config("cannot resolve XDG config dir".into()))?;
         Ok(dirs.config_dir().join("config.toml"))
     }
