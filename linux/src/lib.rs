@@ -7,5 +7,7 @@ pub mod hotkey;
 pub mod injector;
 pub mod overlay;
 pub mod refiner;
+pub mod settings_window;
 pub mod speech;
+pub mod state;
 pub mod tray;
