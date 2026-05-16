@@ -125,6 +125,20 @@ impl LlmRefiner {
         Ok(trimmed)
     }
 
+    /// Fail-safe wrapper around `try_refine` — network/parse errors are
+    /// logged at `warn` and the original text is returned. Use this from
+    /// the listen flow where paste must succeed even when the LLM is
+    /// unreachable.
+    pub async fn refine(&self, text: &str, force: bool) -> String {
+        match self.try_refine(text, force).await {
+            Ok(refined) => refined,
+            Err(e) => {
+                tracing::warn!(error = %e, "llm refine failed; falling back to raw text");
+                text.to_string()
+            }
+        }
+    }
+
     /// Test-only constructor that points at a wiremock server. Public
     /// (not `cfg(test)`-gated) because `tests/` integration tests live
     /// in a separate crate and can't see `#[cfg(test)]` items.
