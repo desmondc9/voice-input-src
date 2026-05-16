@@ -31,6 +31,7 @@ fn main() -> anyhow::Result<()> {
     match cli.command {
         None => run_tray(cfg),
         Some(Command::Transcribe) => run_transcribe(cfg),
+        Some(Command::Listen) => run_listen(cfg),
     }
 }
 
@@ -104,5 +105,12 @@ fn run_transcribe(cfg: Config) -> anyhow::Result<()> {
         "pipeline shutdown complete; transcribed {} segments",
         segment_count
     );
+    Ok(())
+}
+
+fn run_listen(_cfg: Config) -> anyhow::Result<()> {
+    // Implemented in Task 2.5. For now, just print a placeholder so the CLI
+    // dispatch is testable end-to-end.
+    println!("listen subcommand: hotkey + paste wiring not yet implemented (Task 2.5)");
     Ok(())
 }
