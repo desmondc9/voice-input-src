@@ -10,6 +10,8 @@ use voice_input::{
     tray::VoiceInputTray,
 };
 
+use crossbeam_channel;
+
 fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -59,9 +61,45 @@ async fn run_tray_async() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn run_transcribe(_cfg: Config) -> anyhow::Result<()> {
-    // Implemented in Task 1.7. For now, just print a placeholder so the CLI
-    // dispatch is testable end-to-end.
-    println!("transcribe subcommand: pipeline wiring not yet implemented (Task 1.7)");
+fn run_transcribe(cfg: Config) -> anyhow::Result<()> {
+    let model_path = cfg.resolve_model_path().context("resolving whisper model path")?;
+    tracing::info!(model = %model_path.display(), "starting transcribe pipeline");
+
+    let pipeline = voice_input::speech::start_pipeline(&model_path, cfg.language_hint.clone())
+        .context("starting speech pipeline")?;
+
+    tracing::info!("listening — speak into the default mic; press Ctrl+C to stop");
+
+    let mut segment_count = 0_usize;
+    let (interrupt_tx, interrupt_rx) = crossbeam_channel::bounded::<()>(1);
+
+    ctrlc::set_handler(move || {
+        let _ = interrupt_tx.try_send(());
+    })
+    .context("installing Ctrl+C handler")?;
+
+    loop {
+        crossbeam_channel::select! {
+            recv(pipeline.text_rx) -> msg => {
+                match msg {
+                    Ok(text) => {
+                        segment_count += 1;
+                        println!("[segment {}] {}", segment_count, text);
+                    }
+                    Err(_) => {
+                        tracing::info!("pipeline closed");
+                        break;
+                    }
+                }
+            }
+            recv(interrupt_rx) -> _ => {
+                tracing::info!("SIGINT received; shutting down pipeline");
+                break;
+            }
+        }
+    }
+
+    pipeline.join();
+    tracing::info!("pipeline shutdown complete; transcribed {} segments", segment_count);
     Ok(())
 }

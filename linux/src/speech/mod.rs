@@ -7,3 +7,111 @@
 
 pub mod vad;
 pub mod worker;
+
+use std::path::Path;
+use std::thread::JoinHandle;
+
+use crossbeam_channel::{bounded, Receiver};
+
+use crate::audio::{AudioChunk, Capture, Resampler16kMono};
+use crate::error::{AppError, AppResult};
+
+/// Handle returned by `start_pipeline`. Drop to begin teardown; call
+/// `join` to wait for clean shutdown of all worker threads.
+pub struct PipelineHandle {
+    pub text_rx: Receiver<String>,
+    _capture: Capture,
+    vad_handle: Option<JoinHandle<()>>,
+    whisper_handle: Option<JoinHandle<()>>,
+}
+
+impl PipelineHandle {
+    /// Wait for the VAD and whisper workers to finish. Call after dropping
+    /// or otherwise closing the slice/text channels.
+    pub fn join(mut self) {
+        if let Some(h) = self.vad_handle.take() {
+            let _ = h.join();
+        }
+        if let Some(h) = self.whisper_handle.take() {
+            let _ = h.join();
+        }
+    }
+}
+
+/// Start the audio → resample → VAD → whisper pipeline.
+/// Returns a handle including the text receiver.
+pub fn start_pipeline(model_path: &Path, language_hint: String) -> AppResult<PipelineHandle> {
+    let (audio_tx, audio_rx) = bounded::<AudioChunk>(64);
+    let (slice_tx, slice_rx) = bounded::<Vec<f32>>(8);
+    let (text_tx, text_rx) = bounded::<String>(8);
+
+    let capture = Capture::start(audio_tx)?;
+    let input_rate = capture.sample_rate;
+    let input_channels = capture.channels;
+
+    let vad_handle = std::thread::Builder::new()
+        .name("vad-resample".into())
+        .spawn(move || {
+            run_vad_resample(audio_rx, slice_tx, input_rate, input_channels);
+        })
+        .map_err(|e| AppError::Config(format!("spawn vad thread: {}", e)))?;
+
+    let whisper_handle = worker::spawn(model_path, language_hint, slice_rx, text_tx)?;
+
+    Ok(PipelineHandle {
+        text_rx,
+        _capture: capture,
+        vad_handle: Some(vad_handle),
+        whisper_handle: Some(whisper_handle),
+    })
+}
+
+fn run_vad_resample(
+    audio_rx: Receiver<AudioChunk>,
+    slice_tx: crossbeam_channel::Sender<Vec<f32>>,
+    input_rate: u32,
+    input_channels: u16,
+) {
+    let mut resampler = match Resampler16kMono::new(input_rate, input_channels) {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!(error = %e, "resampler init failed");
+            return;
+        }
+    };
+    let mut slicer = match vad::VadSlicer::new() {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::error!(error = %e, "vad init failed");
+            return;
+        }
+    };
+
+    while let Ok(chunk) = audio_rx.recv() {
+        let mono16k = match resampler.process(&chunk.samples) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!(error = %e, "resample failed");
+                continue;
+            }
+        };
+        let segments = match slicer.push(&mono16k) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!(error = %e, "vad push failed");
+                continue;
+            }
+        };
+        for seg in segments {
+            if slice_tx.send(seg).is_err() {
+                tracing::info!("vad: downstream closed, exiting");
+                return;
+            }
+        }
+    }
+
+    if let Some(final_segment) = slicer.flush() {
+        let _ = slice_tx.send(final_segment);
+    }
+    tracing::info!("vad: audio channel closed, exiting");
+}
