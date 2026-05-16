@@ -101,7 +101,11 @@ async fn network_5xx_yields_error_from_try_refine() {
 
     let refiner = LlmRefiner::for_test(server.uri(), "sk-test", "gpt-4o-mini");
     let err = refiner.try_refine("hello", false).await.unwrap_err();
-    assert!(err.to_string().contains("non-2xx"), "expected non-2xx error, got: {}", err);
+    assert!(
+        err.to_string().contains("non-2xx"),
+        "expected non-2xx error, got: {}",
+        err
+    );
 }
 
 #[tokio::test]
@@ -115,7 +119,10 @@ async fn refine_falls_back_to_raw_text_on_5xx() {
 
     let refiner = LlmRefiner::for_test(server.uri(), "sk-test", "gpt-4o-mini");
     let out = refiner.refine("hello world", false).await;
-    assert_eq!(out, "hello world", "refine must fall back to raw text on API errors");
+    assert_eq!(
+        out, "hello world",
+        "refine must fall back to raw text on API errors"
+    );
 }
 
 #[tokio::test]
@@ -131,5 +138,8 @@ async fn refine_falls_back_when_response_missing_content() {
 
     let refiner = LlmRefiner::for_test(server.uri(), "sk-test", "gpt-4o-mini");
     let out = refiner.refine("hello", false).await;
-    assert_eq!(out, "hello", "malformed response must fall back to raw text");
+    assert_eq!(
+        out, "hello",
+        "malformed response must fall back to raw text"
+    );
 }

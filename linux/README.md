@@ -97,7 +97,25 @@ llm_api_key = "sk-..."
 llm_model = "gpt-4o-mini"
 ~~~
 
-The `llm_api_base_url` accepts any OpenAI-compatible endpoint (vLLM, llama.cpp server, Together, Groq, etc.). The 10 s request timeout matches the macOS app. A future Settings UI (Phase 5) will replace manual TOML editing.
+The `llm_api_base_url` accepts any OpenAI-compatible endpoint (Ollama, vLLM, llama.cpp server, Together, Groq, etc.). The 10 s request timeout matches the macOS app. A future Settings UI (Phase 5) will replace manual TOML editing.
+
+#### Ollama (local) example
+
+For a fully-local setup, run [Ollama](https://ollama.com/) and point voice-input at its OpenAI-compatible endpoint:
+
+~~~bash
+ollama pull qwen3.5:2b
+ollama serve  # usually already running as a systemd user service
+~~~
+
+~~~toml
+llm_enabled = true
+llm_api_base_url = "http://localhost:11434/v1"
+llm_api_key = "ollama"
+llm_model = "qwen3.5:2b"
+~~~
+
+`llm_api_key` can be any non-empty string — Ollama does not validate it, but the refiner short-circuits when the key is empty. Small local models (≤3B) often follow the conservative system prompt loosely; if you see the model rewriting or paraphrasing rather than just fixing ASR errors, try a larger model (7B+) or use a cloud provider for refinement.
 
 ## Compositor support
 
