@@ -164,7 +164,9 @@ async fn run_listen_async(cfg: Config, model_path: std::path::PathBuf) -> anyhow
             Some(_deactivated) = deactivated.next() => {
                 if let Some(pipeline) = current_pipeline.take() {
                     tracing::info!("shortcut released; draining and pasting");
-                    let segments = pipeline.drain_and_join();
+                    let segments = tokio::task::spawn_blocking(move || pipeline.drain_and_join())
+                        .await
+                        .context("draining pipeline")?;
                     let joined = segments.join(" ").trim().to_string();
                     if joined.is_empty() {
                         tracing::info!("no segments transcribed; skipping paste");
