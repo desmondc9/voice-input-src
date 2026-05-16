@@ -7,6 +7,9 @@ use crate::error::{AppError, AppResult};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
+    /// Master switch. When false, the hotkey is observed but ignored —
+    /// no recording, no paste. Mirrors macOS "Enabled" menu item.
+    pub enabled: bool,
     pub language_hint: String,
     pub llm_enabled: bool,
     pub llm_api_base_url: String,
@@ -23,6 +26,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            enabled: true,
             language_hint: "zh".to_string(),
             llm_enabled: false,
             llm_api_base_url: "https://api.openai.com/v1".to_string(),
@@ -98,6 +102,7 @@ mod tests {
     #[test]
     fn defaults_have_sensible_values() {
         let cfg = Config::default();
+        assert!(cfg.enabled, "enabled defaults to true");
         assert_eq!(cfg.language_hint, "zh");
         assert_eq!(cfg.llm_api_base_url, "https://api.openai.com/v1");
         assert!(!cfg.llm_enabled);
