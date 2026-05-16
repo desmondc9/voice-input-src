@@ -163,15 +163,26 @@ fn run_listen(cfg: Config) -> anyhow::Result<()> {
             .take()
             .expect("activate called once");
         let window_for_loop = window;
+        let app_for_loop = app.clone();
         gtk4::glib::timeout_add_local(
             std::time::Duration::from_millis(16),
             move || {
-                while let Ok(cmd) = rx.try_recv() {
-                    match cmd {
-                        OverlayCmd::Show => window_for_loop.show(),
-                        OverlayCmd::Hide => window_for_loop.hide(),
-                        OverlayCmd::SetLevel(level) => window_for_loop.set_level(level),
-                        OverlayCmd::SetText(text) => window_for_loop.set_text(&text),
+                loop {
+                    match rx.try_recv() {
+                        Ok(OverlayCmd::Show) => window_for_loop.show(),
+                        Ok(OverlayCmd::Hide) => window_for_loop.hide(),
+                        Ok(OverlayCmd::SetLevel(level)) => window_for_loop.set_level(level),
+                        Ok(OverlayCmd::SetText(text)) => window_for_loop.set_text(&text),
+                        Ok(OverlayCmd::Quit) => {
+                            app_for_loop.quit();
+                            return gtk4::glib::ControlFlow::Break;
+                        }
+                        Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                        Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                            // Backend thread died without sending Quit — clean up.
+                            app_for_loop.quit();
+                            return gtk4::glib::ControlFlow::Break;
+                        }
                     }
                 }
                 gtk4::glib::ControlFlow::Continue
@@ -179,10 +190,11 @@ fn run_listen(cfg: Config) -> anyhow::Result<()> {
         );
     });
 
-    // app.run() blocks until the GTK loop exits (we never explicitly quit
-    // it in this flow; the user kills the process with Ctrl+C in the
-    // launching terminal, which terminates everything).
-    let exit_code = app.run();
+    // GApplication argv parsing tries to treat our clap subcommand (`listen`)
+    // as a file path and emits a GLib-GIO CRITICAL when HANDLES_OPEN isn't
+    // set, which also suppresses the `activate` signal. Pass empty args so
+    // GApplication just calls `activate` and we control its lifecycle.
+    let exit_code = app.run_with_args::<&str>(&[]);
 
     // Tell the backend we're shutting down by closing the channel.
     // The backend's tokio::select! has a ctrl_c arm; once the user
@@ -285,7 +297,8 @@ async fn run_listen_async(
         }
     }
 
-    // Final overlay cleanup attempt.
+    // Tell the GTK main loop to quit so the process exits cleanly.
     let _ = overlay_tx.send(OverlayCmd::Hide);
+    let _ = overlay_tx.send(OverlayCmd::Quit);
     Ok(())
 }

@@ -24,6 +24,8 @@ pub enum OverlayCmd {
     SetText(String),
     /// Hotkey released and paste completed — hide the capsule.
     Hide,
+    /// Backend is shutting down (Ctrl+C). The GTK loop should quit too.
+    Quit,
 }
 
 /// Backend → main channel.
