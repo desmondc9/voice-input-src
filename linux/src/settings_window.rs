@@ -153,10 +153,7 @@ pub fn build_window(app: &Application, state: &AppState) -> ApplicationWindow {
 
             let status_label = status_label.clone();
             gtk4::glib::MainContext::default().spawn_local(async move {
-                match refiner
-                    .try_refine("Hello, this is a test.", true)
-                    .await
-                {
+                match refiner.try_refine("Hello, this is a test.", true).await {
                     Ok(text) => {
                         let truncated = if text.chars().count() > 200 {
                             let prefix: String = text.chars().take(200).collect();
@@ -197,5 +194,8 @@ fn apply_status_color(label: &gtk4::Label, kind: StatusKind) {
         StatusKind::Error => "#e01b24",
         StatusKind::Muted => "#888888",
     };
-    label.set_markup(&format!("<span foreground=\"{}\">{}</span>", color, escaped));
+    label.set_markup(&format!(
+        "<span foreground=\"{}\">{}</span>",
+        color, escaped
+    ));
 }

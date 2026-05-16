@@ -2,7 +2,7 @@
 
 Wayland-native voice input for KDE Plasma 6, sway, and hyprland. Hold a configured key, speak, release — the transcript is pasted into the focused application.
 
-> Status: **Phase 4** — optional LLM refinement of transcripts before paste (OpenAI-compatible APIs). Overlay (Phase 3), tray, transcribe CLI, and listen mode all still work.
+> Status: **Phase 5** — tray menu (Enabled / Language / LLM Refinement → Settings dialog) replaces manual TOML editing. Default invocation (`voice-input`) launches the full app — tray + hotkey + overlay + LLM refinement — in one process. Headless `transcribe` CLI still works.
 
 > **Phase 3 GNOME note**: the overlay uses `wlr-layer-shell`, which GNOME's mutter does NOT implement. `voice-input listen` will fail to position the capsule correctly on GNOME — explicitly out of scope.
 
@@ -39,13 +39,20 @@ The script installs the `ydotool` package, adds a udev rule, joins you to the `i
 
 ## Run
 
-### Tray mode (Phase 0 behavior)
+### Default mode (full app)
 
 ```bash
-RUST_LOG=info cargo run
+RUST_LOG=info cargo run --release
 ```
 
-A tray icon appears in your system tray (KDE Plasma) or waybar (sway / hyprland — needs the `tray` module).
+A tray icon appears in your system tray (KDE Plasma) or waybar (sway / hyprland — needs the `tray` module). The hotkey + overlay are wired automatically. The menu exposes:
+
+- **Enabled** — master switch. Toggle off to silently ignore the hotkey without quitting.
+- **Language ▶** — whisper transcription language (auto-detect / English / 中文 / 日本語 / 한국어 / Español).
+- **LLM Refinement ▶** → **Enabled** + **Settings…** — opens the dialog for Base URL / API Key / Model with Test + Save.
+- **Quit** — clean shutdown.
+
+All menu changes persist to `~/.config/voice-input/config.toml` automatically; no manual file editing needed.
 
 ### Transcribe mode (Phase 1)
 

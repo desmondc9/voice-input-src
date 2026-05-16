@@ -80,7 +80,6 @@ impl Tray for VoiceInputTray {
     }
 }
 
-
 /// Whisper language codes shown in the tray. Empty string = auto-detect.
 /// Native-script labels match macOS AppDelegate.swift:190-197 adapted
 /// from BCP-47 to ISO 639-1 (whisper.cpp's format).
@@ -105,8 +104,9 @@ fn language_menu(current: &str) -> MenuItem<VoiceInputTray> {
                 checked,
                 activate: Box::new(move |this: &mut VoiceInputTray| {
                     let code_clone = code.clone();
-                    if let Err(e) =
-                        this.state.update(|cfg| cfg.language_hint = code_clone.clone())
+                    if let Err(e) = this
+                        .state
+                        .update(|cfg| cfg.language_hint = code_clone.clone())
                     {
                         tracing::error!(error = %e, "tray: failed to persist language");
                     } else {
@@ -126,7 +126,6 @@ fn language_menu(current: &str) -> MenuItem<VoiceInputTray> {
     }
     .into()
 }
-
 
 fn llm_menu(llm_enabled: bool) -> MenuItem<VoiceInputTray> {
     let submenu: Vec<MenuItem<VoiceInputTray>> = vec![

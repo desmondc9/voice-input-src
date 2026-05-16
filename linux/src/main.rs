@@ -1,4 +1,3 @@
-
 use anyhow::Context;
 use clap::Parser;
 use gtk4::prelude::*;
@@ -6,7 +5,7 @@ use gtk4::Application;
 use voice_input::{
     cli::{Cli, Command},
     config::Config,
-    overlay::{self, UiCmd, OverlayWindow},
+    overlay::{self, OverlayWindow, UiCmd},
 };
 
 fn main() -> anyhow::Result<()> {
@@ -230,8 +229,7 @@ async fn run_backend_async(
 
     let mut current_pipeline: Option<speech::PipelineHandle> = None;
     let mut current_capture: Option<voice_input::audio::Capture> = None;
-    let mut refiner =
-        voice_input::refiner::LlmRefiner::from_config(&state.snapshot());
+    let mut refiner = voice_input::refiner::LlmRefiner::from_config(&state.snapshot());
     tracing::info!(active = refiner.is_active(), "llm refiner initialized");
 
     // RMS level fan-out: vad-resample thread → blocking task → overlay channel.
@@ -241,10 +239,7 @@ async fn run_backend_async(
     tokio::task::spawn_blocking(move || {
         while let Ok(level) = level_rx.recv() {
             // Stop forwarding when the overlay channel is closed.
-            if overlay_tx_for_levels
-                .send(UiCmd::SetLevel(level))
-                .is_err()
-            {
+            if overlay_tx_for_levels.send(UiCmd::SetLevel(level)).is_err() {
                 break;
             }
         }
