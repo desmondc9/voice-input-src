@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use gtk4::cairo::Context;
 use gtk4::prelude::*;
-use gtk4::{DrawingArea, glib};
+use gtk4::{glib, DrawingArea};
 
 /// 5-bar waveform widget — exact port of macOS `WaveformView`.
 ///
@@ -49,15 +49,18 @@ impl WaveformView {
         let smoothed = smoothed_level.clone();
         let target = target_level.clone();
         let area_ref = drawing_area.clone();
-        glib::timeout_add_local(std::time::Duration::from_millis(1000 / REDRAW_HZ as u64), move || {
-            let prev = smoothed.get();
-            let tgt = target.get();
-            let factor = if tgt > prev { ATTACK } else { RELEASE };
-            let new = prev + (tgt - prev) * factor;
-            smoothed.set(new);
-            area_ref.queue_draw();
-            glib::ControlFlow::Continue
-        });
+        glib::timeout_add_local(
+            std::time::Duration::from_millis(1000 / REDRAW_HZ as u64),
+            move || {
+                let prev = smoothed.get();
+                let tgt = target.get();
+                let factor = if tgt > prev { ATTACK } else { RELEASE };
+                let new = prev + (tgt - prev) * factor;
+                smoothed.set(new);
+                area_ref.queue_draw();
+                glib::ControlFlow::Continue
+            },
+        );
 
         // Draw callback closes over smoothed_level (read-only).
         let smoothed_for_draw = smoothed_level.clone();

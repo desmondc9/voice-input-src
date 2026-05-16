@@ -174,30 +174,27 @@ fn run_listen(cfg: Config) -> anyhow::Result<()> {
             .expect("activate called once");
         let window_for_loop = window;
         let app_for_loop = app.clone();
-        gtk4::glib::timeout_add_local(
-            std::time::Duration::from_millis(16),
-            move || {
-                loop {
-                    match rx.try_recv() {
-                        Ok(OverlayCmd::Show) => window_for_loop.show(),
-                        Ok(OverlayCmd::Hide) => window_for_loop.hide(),
-                        Ok(OverlayCmd::SetLevel(level)) => window_for_loop.set_level(level),
-                        Ok(OverlayCmd::SetText(text)) => window_for_loop.set_text(&text),
-                        Ok(OverlayCmd::Quit) => {
-                            app_for_loop.quit();
-                            return gtk4::glib::ControlFlow::Break;
-                        }
-                        Err(std::sync::mpsc::TryRecvError::Empty) => break,
-                        Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                            // Backend thread died without sending Quit — clean up.
-                            app_for_loop.quit();
-                            return gtk4::glib::ControlFlow::Break;
-                        }
+        gtk4::glib::timeout_add_local(std::time::Duration::from_millis(16), move || {
+            loop {
+                match rx.try_recv() {
+                    Ok(OverlayCmd::Show) => window_for_loop.show(),
+                    Ok(OverlayCmd::Hide) => window_for_loop.hide(),
+                    Ok(OverlayCmd::SetLevel(level)) => window_for_loop.set_level(level),
+                    Ok(OverlayCmd::SetText(text)) => window_for_loop.set_text(&text),
+                    Ok(OverlayCmd::Quit) => {
+                        app_for_loop.quit();
+                        return gtk4::glib::ControlFlow::Break;
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        // Backend thread died without sending Quit — clean up.
+                        app_for_loop.quit();
+                        return gtk4::glib::ControlFlow::Break;
                     }
                 }
-                gtk4::glib::ControlFlow::Continue
-            },
-        );
+            }
+            gtk4::glib::ControlFlow::Continue
+        });
     });
 
     // Cross-thread Ctrl+C handler: notify the backend and ask the GTK main
@@ -262,7 +259,10 @@ async fn run_listen_async(
     tokio::task::spawn_blocking(move || {
         while let Ok(level) = level_rx.recv() {
             // Stop forwarding when the overlay channel is closed.
-            if overlay_tx_for_levels.send(OverlayCmd::SetLevel(level)).is_err() {
+            if overlay_tx_for_levels
+                .send(OverlayCmd::SetLevel(level))
+                .is_err()
+            {
                 break;
             }
         }
