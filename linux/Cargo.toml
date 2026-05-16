@@ -14,7 +14,6 @@ cpal = "0.15"
 crossbeam-channel = "0.5"
 ctrlc = "3"
 directories = "5"
-hound = "3"
 ksni = { version = "0.3", features = ["tokio"] }
 rubato = "0.16"
 serde = { version = "1", features = ["derive"] }
