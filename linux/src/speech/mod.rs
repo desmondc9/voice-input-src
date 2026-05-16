@@ -81,9 +81,14 @@ impl Drop for PipelineHandle {
 /// Start the audio → resample → VAD → whisper pipeline.
 /// Returns `(Capture, PipelineHandle)` where Capture must be held on the
 /// spawning thread (it's !Send) and PipelineHandle can be moved to spawn_blocking.
+///
+/// If `level_tx` is provided, RMS levels from each incoming `AudioChunk`
+/// are forwarded via `try_send` (levels are lossy; dropped if the consumer
+/// is slow).
 pub fn start_pipeline(
     model_path: &Path,
     language_hint: String,
+    level_tx: Option<crossbeam_channel::Sender<f32>>,
 ) -> AppResult<(Capture, PipelineHandle)> {
     let (audio_tx, audio_rx) = bounded::<AudioChunk>(64);
     let (slice_tx, slice_rx) = bounded::<Vec<f32>>(8);
@@ -96,7 +101,7 @@ pub fn start_pipeline(
     let vad_handle = std::thread::Builder::new()
         .name("vad-resample".into())
         .spawn(move || {
-            run_vad_resample(audio_rx, slice_tx, input_rate, input_channels);
+            run_vad_resample(audio_rx, slice_tx, input_rate, input_channels, level_tx);
         })
         .map_err(|e| AppError::Config(format!("spawn vad thread: {}", e)))?;
 
@@ -115,6 +120,7 @@ fn run_vad_resample(
     slice_tx: crossbeam_channel::Sender<Vec<f32>>,
     input_rate: u32,
     input_channels: u16,
+    level_tx: Option<crossbeam_channel::Sender<f32>>,
 ) {
     let mut resampler = match Resampler16kMono::new(input_rate, input_channels) {
         Ok(r) => r,
@@ -132,6 +138,12 @@ fn run_vad_resample(
     };
 
     while let Ok(chunk) = audio_rx.recv() {
+        // Fan out the RMS level to the overlay if subscribed.
+        if let Some(tx) = level_tx.as_ref() {
+            // try_send: if the consumer is slow, drop the level update.
+            // Levels are inherently lossy anyway.
+            let _ = tx.try_send(chunk.level);
+        }
         let mono16k = match resampler.process(&chunk.samples) {
             Ok(s) => s,
             Err(e) => {

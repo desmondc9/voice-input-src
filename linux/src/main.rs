@@ -70,7 +70,7 @@ fn run_transcribe(cfg: Config) -> anyhow::Result<()> {
     tracing::info!(model = %model_path.display(), "starting transcribe pipeline");
 
     let (_capture, pipeline) =
-        voice_input::speech::start_pipeline(&model_path, cfg.language_hint.clone())
+        voice_input::speech::start_pipeline(&model_path, cfg.language_hint.clone(), None)
             .context("starting speech pipeline")?;
 
     tracing::info!("listening — speak into the default mic; press Ctrl+C to stop");
@@ -218,6 +218,19 @@ async fn run_listen_async(
     let mut current_capture: Option<voice_input::audio::Capture> = None;
     let language_hint = cfg.language_hint.clone();
 
+    // RMS level fan-out: vad-resample thread → blocking task → overlay channel.
+    // We use a bounded crossbeam channel sized for ~1s of audio at 100Hz.
+    let (level_tx, level_rx) = crossbeam_channel::bounded::<f32>(128);
+    let overlay_tx_for_levels = overlay_tx.clone();
+    tokio::task::spawn_blocking(move || {
+        while let Ok(level) = level_rx.recv() {
+            // Stop forwarding when the overlay channel is closed.
+            if overlay_tx_for_levels.send(OverlayCmd::SetLevel(level)).is_err() {
+                break;
+            }
+        }
+    });
+
     loop {
         tokio::select! {
             biased;
@@ -230,7 +243,7 @@ async fn run_listen_async(
                     continue;
                 }
                 tracing::info!("shortcut pressed; starting pipeline");
-                match speech::start_pipeline(&model_path, language_hint.clone()) {
+                match speech::start_pipeline(&model_path, language_hint.clone(), Some(level_tx.clone())) {
                     Ok((capture, p)) => {
                         let _ = overlay_tx.send(OverlayCmd::Show);
                         current_capture = Some(capture);
