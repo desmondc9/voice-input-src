@@ -5,5 +5,6 @@ pub mod config;
 pub mod error;
 pub mod hotkey;
 pub mod injector;
+pub mod overlay;
 pub mod speech;
 pub mod tray;
