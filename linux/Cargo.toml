@@ -9,7 +9,7 @@ description = "Wayland-native voice input — hold-to-talk speech-to-text"
 
 [dependencies]
 anyhow = "1"
-ashpd = "0.13"
+ashpd = { version = "0.13", features = ["global_shortcuts"] }
 clap = { version = "4", features = ["derive"] }
 cpal = "0.15"
 crossbeam-channel = "0.5"
