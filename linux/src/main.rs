@@ -164,9 +164,10 @@ async fn run_listen_async(cfg: Config, model_path: std::path::PathBuf) -> anyhow
             Some(_deactivated) = deactivated.next() => {
                 if let Some(pipeline) = current_pipeline.take() {
                     tracing::info!("shortcut released; draining and pasting");
-                    let segments = tokio::task::spawn_blocking(move || pipeline.drain_and_join())
-                        .await
-                        .context("draining pipeline")?;
+                    // drain_and_join is blocking but cannot use spawn_blocking:
+                    // PipelineHandle is !Send because cpal::Stream is !Send.
+                    // Phase 3 should split Capture drop from thread joins to fix.
+                    let segments = pipeline.drain_and_join();
                     let joined = segments.join(" ").trim().to_string();
                     if joined.is_empty() {
                         tracing::info!("no segments transcribed; skipping paste");
