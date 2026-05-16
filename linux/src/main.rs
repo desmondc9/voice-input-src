@@ -2,11 +2,14 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use clap::Parser;
+use gtk4::prelude::*;
+use gtk4::Application;
 use ksni::TrayMethods;
 use tokio::sync::Notify;
 use voice_input::{
     cli::{Cli, Command},
     config::Config,
+    overlay::{self, OverlayCmd, OverlayWindow},
     tray::VoiceInputTray,
 };
 
@@ -119,15 +122,84 @@ fn run_listen(cfg: Config) -> anyhow::Result<()> {
     voice_input::injector::verify_available()
         .context("ydotool must be installed and ydotoold running")?;
 
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .context("building tokio runtime")?;
+    // Backend ↔ GTK channel.
+    let (overlay_tx, overlay_rx) = overlay::channel();
 
-    runtime.block_on(run_listen_async(cfg, model_path))
+    // Spawn the backend thread (owns tokio runtime + ashpd portal + pipeline).
+    let cfg_for_backend = cfg.clone();
+    let model_path_for_backend = model_path.clone();
+    let backend = std::thread::Builder::new()
+        .name("voice-input-backend".into())
+        .spawn(move || {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .expect("build tokio runtime in backend thread");
+            if let Err(e) = rt.block_on(run_listen_async(
+                cfg_for_backend,
+                model_path_for_backend,
+                overlay_tx,
+            )) {
+                tracing::error!(error = %e, "backend exited with error");
+            }
+        })
+        .context("spawning backend thread")?;
+
+    // Run GTK on the OS main thread. The Application's `activate` callback
+    // creates the OverlayWindow and attaches the overlay_rx polling loop.
+    let app = Application::builder()
+        .application_id("com.yetone.VoiceInput")
+        .build();
+
+    let overlay_rx_cell = std::cell::RefCell::new(Some(overlay_rx));
+    app.connect_activate(move |app| {
+        let window = OverlayWindow::new(app);
+        // Hidden until backend sends Show.
+        window.hide();
+
+        // Take the receiver into a long-lived poll loop.
+        let rx = overlay_rx_cell
+            .borrow_mut()
+            .take()
+            .expect("activate called once");
+        let window_for_loop = window;
+        gtk4::glib::timeout_add_local(
+            std::time::Duration::from_millis(16),
+            move || {
+                while let Ok(cmd) = rx.try_recv() {
+                    match cmd {
+                        OverlayCmd::Show => window_for_loop.show(),
+                        OverlayCmd::Hide => window_for_loop.hide(),
+                        OverlayCmd::SetLevel(level) => window_for_loop.set_level(level),
+                        OverlayCmd::SetText(text) => window_for_loop.set_text(&text),
+                    }
+                }
+                gtk4::glib::ControlFlow::Continue
+            },
+        );
+    });
+
+    // app.run() blocks until the GTK loop exits (we never explicitly quit
+    // it in this flow; the user kills the process with Ctrl+C in the
+    // launching terminal, which terminates everything).
+    let exit_code = app.run();
+
+    // Tell the backend we're shutting down by closing the channel.
+    // The backend's tokio::select! has a ctrl_c arm; once the user
+    // SIGINTs, both halves wind down.
+    let _ = backend.join();
+
+    if exit_code.get() != 0 {
+        anyhow::bail!("gtk application exited with code {}", exit_code.get());
+    }
+    Ok(())
 }
 
-async fn run_listen_async(cfg: Config, model_path: std::path::PathBuf) -> anyhow::Result<()> {
+async fn run_listen_async(
+    cfg: Config,
+    model_path: std::path::PathBuf,
+    overlay_tx: overlay::OverlaySender,
+) -> anyhow::Result<()> {
     use futures_util::stream::StreamExt;
     use voice_input::hotkey::HotkeyHandle;
     use voice_input::speech;
@@ -155,12 +227,12 @@ async fn run_listen_async(cfg: Config, model_path: std::path::PathBuf) -> anyhow
             }
             Some(_activated) = activated.next() => {
                 if current_pipeline.is_some() {
-                    // The portal occasionally double-emits activated; ignore if already recording.
                     continue;
                 }
                 tracing::info!("shortcut pressed; starting pipeline");
                 match speech::start_pipeline(&model_path, language_hint.clone()) {
                     Ok((capture, p)) => {
+                        let _ = overlay_tx.send(OverlayCmd::Show);
                         current_capture = Some(capture);
                         current_pipeline = Some(p);
                     }
@@ -170,11 +242,8 @@ async fn run_listen_async(cfg: Config, model_path: std::path::PathBuf) -> anyhow
             Some(_deactivated) = deactivated.next() => {
                 if let Some(pipeline) = current_pipeline.take() {
                     tracing::info!("shortcut released; draining and pasting");
-                    // Drop Capture first (it's !Send, must stay on this thread)
-                    // — that lets the VAD thread's audio_rx see disconnect.
+                    let _ = overlay_tx.send(OverlayCmd::SetText("Refining…".into()));
                     drop(current_capture.take());
-                    // PipelineHandle is now Send: move it to the blocking pool
-                    // so the join + drain don't stall the async runtime.
                     let segments = tokio::task::spawn_blocking(move || pipeline.join_remaining())
                         .await
                         .context("draining pipeline")?;
@@ -193,6 +262,7 @@ async fn run_listen_async(cfg: Config, model_path: std::path::PathBuf) -> anyhow
                             tracing::error!(error = %e, "paste failed");
                         }
                     }
+                    let _ = overlay_tx.send(OverlayCmd::Hide);
                 }
             }
             else => {
@@ -202,5 +272,7 @@ async fn run_listen_async(cfg: Config, model_path: std::path::PathBuf) -> anyhow
         }
     }
 
+    // Final overlay cleanup attempt.
+    let _ = overlay_tx.send(OverlayCmd::Hide);
     Ok(())
 }

@@ -8,6 +8,8 @@
 pub mod waveform;
 pub mod window;
 
+pub use window::OverlayWindow;
+
 use std::sync::mpsc;
 
 /// Commands the backend thread sends to the GTK main thread.
