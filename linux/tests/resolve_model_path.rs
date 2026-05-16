@@ -37,8 +37,10 @@ fn env_var_override_wins() {
 
 #[test]
 fn config_field_wins_over_default() {
-    let mut cfg = Config::default();
-    cfg.whisper_model_path = Some(PathBuf::from("/tmp/voice-input-test-config.bin"));
+    let cfg = Config {
+        whisper_model_path: Some(PathBuf::from("/tmp/voice-input-test-config.bin")),
+        ..Config::default()
+    };
     with_env_var("", || {
         let path = cfg.resolve_model_path().expect("resolve");
         assert_eq!(path, PathBuf::from("/tmp/voice-input-test-config.bin"));
