@@ -119,13 +119,83 @@ pub fn build_window(app: &Application, state: &AppState) -> ApplicationWindow {
         });
     }
 
-    // Test: placeholder for Task 5.8 — no HTTP yet.
+    // Test: builds a one-shot LlmRefiner from the CURRENT field values
+    // (NOT the persisted Config) and calls try_refine(force=true) so the
+    // refiner's enabled/configured guard is bypassed. Runs async via
+    // glib::MainContext::spawn_local so the UI stays responsive during
+    // the HTTP round-trip.
     {
         let status_label = status_label.clone();
+        let url_entry = url_entry.clone();
+        let key_entry = key_entry.clone();
+        let model_entry = model_entry.clone();
+        let snapshot = state.snapshot();
         test_button.connect_clicked(move |_| {
-            status_label.set_text("Test not yet implemented (Task 5.8)");
+            let url = url_entry.text().to_string();
+            let key = key_entry.text().to_string();
+            let model = model_entry.text().to_string();
+
+            if key.trim().is_empty() {
+                status_label.set_text("API key is empty");
+                apply_status_color(&status_label, StatusKind::Error);
+                return;
+            }
+            status_label.set_text("Testing…");
+            apply_status_color(&status_label, StatusKind::Muted);
+
+            // Synthesize a Config that mirrors the entered fields so the
+            // refiner reads them without us having to call AppState::update.
+            let mut probe_cfg = snapshot.clone();
+            probe_cfg.llm_api_base_url = url;
+            probe_cfg.llm_api_key = key;
+            probe_cfg.llm_model = model;
+            let refiner = crate::refiner::LlmRefiner::from_config(&probe_cfg);
+
+            let status_label = status_label.clone();
+            gtk4::glib::MainContext::default().spawn_local(async move {
+                match refiner
+                    .try_refine("Hello, this is a test.", true)
+                    .await
+                {
+                    Ok(text) => {
+                        let truncated = if text.chars().count() > 200 {
+                            let prefix: String = text.chars().take(200).collect();
+                            format!("{}…", prefix)
+                        } else {
+                            text
+                        };
+                        status_label.set_text(&format!("OK: {}", truncated));
+                        apply_status_color(&status_label, StatusKind::Success);
+                    }
+                    Err(e) => {
+                        status_label.set_text(&e.to_string());
+                        apply_status_color(&status_label, StatusKind::Error);
+                    }
+                }
+            });
         });
     }
 
     window
+}
+
+#[derive(Clone, Copy)]
+enum StatusKind {
+    Success,
+    Error,
+    Muted,
+}
+
+/// Re-render the label's current text with a pango foreground span so the
+/// status conveys success/error/muted color. We use inline markup rather
+/// than wiring a CSS provider -- Label::set_markup is built-in.
+fn apply_status_color(label: &gtk4::Label, kind: StatusKind) {
+    let text = label.text();
+    let escaped = gtk4::glib::markup_escape_text(&text);
+    let color = match kind {
+        StatusKind::Success => "#2ec27e",
+        StatusKind::Error => "#e01b24",
+        StatusKind::Muted => "#888888",
+    };
+    label.set_markup(&format!("<span foreground=\"{}\">{}</span>", color, escaped));
 }
