@@ -42,10 +42,12 @@ A tray icon appears in your system tray (KDE Plasma) or waybar (sway / hyprland 
 ### Transcribe mode (Phase 1)
 
 ```bash
-RUST_LOG=info cargo run -- transcribe
+RUST_LOG=info cargo run --release -- transcribe
 ```
 
 Reads from the default microphone, slices speech on natural pauses (≥300 ms silence), and prints each transcribed segment. Press Ctrl+C to stop.
+
+> Use `--release`. Debug-profile whisper inference is 5–10× slower; you'll get poor results without it.
 
 Example output:
 ```text
