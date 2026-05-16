@@ -42,6 +42,106 @@ impl LlmRefiner {
     pub fn is_active(&self) -> bool {
         self.enabled && !self.api_key.is_empty()
     }
+
+    /// Call the LLM and return refined text. Errors propagate — callers
+    /// that want fail-safe behavior should use `refine` instead.
+    ///
+    /// When `force` is false and the refiner is inactive (disabled OR
+    /// no api_key configured), returns the input unchanged WITHOUT
+    /// making a network call. Force-bypass exists so Phase 5's
+    /// Settings → Test button can verify configuration before saving.
+    pub async fn try_refine(&self, text: &str, force: bool) -> crate::error::AppResult<String> {
+        if !force && !self.is_active() {
+            return Ok(text.to_string());
+        }
+        if text.is_empty() {
+            return Ok(String::new());
+        }
+
+        // Trim a trailing slash on the base URL so we don't double up.
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/chat/completions", base);
+
+        let body = serde_json::json!({
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": text},
+            ],
+            "temperature": 0.3,
+        });
+
+        tracing::info!(url = %url, model = %self.model, "llm refine request");
+
+        let resp = self
+            .client
+            .post(&url)
+            .bearer_auth(&self.api_key)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| {
+                crate::error::AppError::NetworkError(format!("llm refine send: {}", e))
+            })?;
+
+        let status = resp.status();
+        let raw = resp.text().await.map_err(|e| {
+            crate::error::AppError::NetworkError(format!("llm refine body: {}", e))
+        })?;
+
+        if !status.is_success() {
+            return Err(crate::error::AppError::NetworkError(format!(
+                "llm refine non-2xx: {} body={}",
+                status, raw
+            )));
+        }
+
+        let json: serde_json::Value = serde_json::from_str(&raw).map_err(|e| {
+            crate::error::AppError::NetworkError(format!(
+                "llm refine parse: {} body={}",
+                e, raw
+            ))
+        })?;
+
+        let content = json
+            .get("choices")
+            .and_then(|c| c.get(0))
+            .and_then(|c| c.get("message"))
+            .and_then(|m| m.get("content"))
+            .and_then(|c| c.as_str())
+            .ok_or_else(|| {
+                crate::error::AppError::NetworkError(format!(
+                    "llm refine missing choices[0].message.content; body={}",
+                    raw
+                ))
+            })?;
+
+        let trimmed = content.trim().to_string();
+        tracing::info!(
+            input_bytes = text.len(),
+            output_bytes = trimmed.len(),
+            "llm refine response"
+        );
+        Ok(trimmed)
+    }
+
+    /// Test-only constructor that points at a wiremock server. Public
+    /// (not `cfg(test)`-gated) because `tests/` integration tests live
+    /// in a separate crate and can't see `#[cfg(test)]` items.
+    #[doc(hidden)]
+    pub fn for_test(base_url: impl Into<String>, api_key: impl Into<String>, model: impl Into<String>) -> Self {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
+            .build()
+            .expect("reqwest client build");
+        Self {
+            client,
+            base_url: base_url.into(),
+            api_key: api_key.into(),
+            model: model.into(),
+            enabled: true,
+        }
+    }
 }
 
 #[cfg(test)]
