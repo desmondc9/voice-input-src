@@ -1,9 +1,16 @@
 //! Speech pipeline: VAD slicing + whisper transcription.
 //!
-//! These modules deliberately use `std::thread` + `crossbeam_channel`
-//! rather than tokio tasks. Phase 3 will move the GTK4 event loop onto
-//! the main thread; keeping the speech pipeline runtime-agnostic means
-//! we don't have to rewrite it then.
+//! These modules use `std::thread` + `crossbeam_channel`, not tokio
+//! tasks. `voice-input listen` (Phase 2+) runs GTK4 on the OS main
+//! thread (a hard GTK4 requirement) and the tokio runtime in a
+//! background `std::thread`; the speech pipeline lives entirely
+//! beneath that backend thread and is unaffected by the GTK/tokio
+//! split. See `main::run_listen` for the wiring.
+//!
+//! `start_pipeline` returns `(Capture, PipelineHandle)` as a tuple:
+//! `Capture` holds the cpal stream and is `!Send`, so it stays on
+//! the calling thread. `PipelineHandle` is `Send` and can be moved
+//! into `spawn_blocking` for the worker-thread joins on shutdown.
 
 pub mod vad;
 pub mod worker;
@@ -16,54 +23,52 @@ use crossbeam_channel::{bounded, Receiver};
 use crate::audio::{AudioChunk, Capture, Resampler16kMono};
 use crate::error::{AppError, AppResult};
 
-/// Handle returned by `start_pipeline`. Call `join` to perform clean
-/// shutdown (closes the audio stream first, then waits for the worker
-/// threads). Simply dropping the handle also shuts down — the `Capture`
-/// stops on drop and the worker threads will exit when their input
-/// channels close.
+/// Send-friendly handle to the speech pipeline worker threads.
+///
+/// `PipelineHandle` deliberately does NOT own the `Capture` audio stream
+/// (which is `!Send` because `cpal::Stream` is `!Send`). The caller of
+/// `start_pipeline` receives a `(Capture, PipelineHandle)` tuple and must
+/// hold Capture on the thread where the pipeline was started; this lets
+/// the PipelineHandle be moved into `tokio::task::spawn_blocking` while
+/// the caller drops Capture on the original thread to unblock the VAD
+/// thread's `audio_rx.recv()`.
 pub struct PipelineHandle {
     pub text_rx: Receiver<String>,
-    /// Wrapped in `Option` so `join` can drop the audio stream BEFORE
-    /// awaiting the VAD thread. Without this, the VAD thread would block
-    /// on `audio_rx.recv()` forever because `audio_tx` lives inside the
-    /// cpal stream owned by `Capture`.
-    capture: Option<Capture>,
     vad_handle: Option<JoinHandle<()>>,
     whisper_handle: Option<JoinHandle<()>>,
 }
 
 impl PipelineHandle {
-    /// Perform an orderly shutdown:
-    /// 1. Drop the audio capture so the cpal stream stops and the
-    ///    `audio_tx` Sender is released, allowing the VAD thread's
-    ///    `audio_rx.recv()` to return Err.
-    /// 2. Join the VAD thread (now able to exit).
-    /// 3. The VAD thread, on exit, drops `slice_tx`, which lets the
-    ///    whisper worker's `slices_rx.recv()` return Err.
-    /// 4. Join the whisper worker thread.
-    pub fn join(mut self) {
-        self.shutdown_internal();
-    }
-
-    /// Shut down (same as `join`), then drain any remaining segments from
-    /// `text_rx`. Returns the buffered segments in arrival order.
+    /// Join the worker threads. Drains `text_rx` after joins return —
+    /// at that point all senders have been dropped, so `try_recv` yields
+    /// every buffered segment exactly once.
     ///
-    /// Phase 2 uses this after a hotkey release to capture the final
-    /// segments before pasting.
-    pub fn drain_and_join(mut self) -> Vec<String> {
-        self.shutdown_internal();
-        // After both worker threads have joined, all senders for text_tx
-        // have been dropped. The remaining items in text_rx are exactly
-        // the segments produced before shutdown.
+    /// IMPORTANT: the caller must drop the corresponding `Capture` BEFORE
+    /// calling this (typically via `drop(capture)` on the async thread,
+    /// then `spawn_blocking(move || handle.join_remaining())`). Without
+    /// dropping Capture first, this will block forever because the VAD
+    /// thread is waiting for `audio_rx` to close.
+    pub fn join_remaining(mut self) -> Vec<String> {
+        if let Some(h) = self.vad_handle.take() {
+            let _ = h.join();
+        }
+        if let Some(h) = self.whisper_handle.take() {
+            let _ = h.join();
+        }
         let mut out = Vec::new();
         while let Ok(seg) = self.text_rx.try_recv() {
             out.push(seg);
         }
         out
     }
+}
 
-    fn shutdown_internal(&mut self) {
-        drop(self.capture.take());
+impl Drop for PipelineHandle {
+    fn drop(&mut self) {
+        // If `join_remaining` wasn't called, ensure threads still get joined
+        // on Drop. This won't deadlock as long as the corresponding Capture
+        // has been dropped — if it hasn't, the caller has a bug and will
+        // see this hang in their logs.
         if let Some(h) = self.vad_handle.take() {
             let _ = h.join();
         }
@@ -73,16 +78,13 @@ impl PipelineHandle {
     }
 }
 
-impl Drop for PipelineHandle {
-    fn drop(&mut self) {
-        // Idempotent because shutdown_internal uses Option::take.
-        self.shutdown_internal();
-    }
-}
-
 /// Start the audio → resample → VAD → whisper pipeline.
-/// Returns a handle including the text receiver.
-pub fn start_pipeline(model_path: &Path, language_hint: String) -> AppResult<PipelineHandle> {
+/// Returns `(Capture, PipelineHandle)` where Capture must be held on the
+/// spawning thread (it's !Send) and PipelineHandle can be moved to spawn_blocking.
+pub fn start_pipeline(
+    model_path: &Path,
+    language_hint: String,
+) -> AppResult<(Capture, PipelineHandle)> {
     let (audio_tx, audio_rx) = bounded::<AudioChunk>(64);
     let (slice_tx, slice_rx) = bounded::<Vec<f32>>(8);
     let (text_tx, text_rx) = bounded::<String>(64);
@@ -100,12 +102,12 @@ pub fn start_pipeline(model_path: &Path, language_hint: String) -> AppResult<Pip
 
     let whisper_handle = worker::spawn(model_path, language_hint, slice_rx, text_tx)?;
 
-    Ok(PipelineHandle {
+    let handle = PipelineHandle {
         text_rx,
-        capture: Some(capture),
         vad_handle: Some(vad_handle),
         whisper_handle: Some(whisper_handle),
-    })
+    };
+    Ok((capture, handle))
 }
 
 fn run_vad_resample(

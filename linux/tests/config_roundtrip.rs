@@ -9,7 +9,6 @@ fn write_then_read_yields_same_config() {
         language_hint: "ja".into(),
         llm_enabled: true,
         llm_api_key: "sk-test-12345".into(),
-        shortcut_handle: Some("portal-handle-abc".into()),
         ..Default::default()
     };
 

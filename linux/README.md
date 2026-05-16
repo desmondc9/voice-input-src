@@ -86,7 +86,6 @@ Requires the steps in "Install ydotool" above.
 
 - `language_hint = "zh"` — passed to whisper as a hint (`"en"`, `"ja"`, etc., or empty for auto-detect)
 - `whisper_model_size = "small"` — determines the default model path
-- `shortcut_handle` — reserved for explicit portal-handle persistence; currently unused (the portal remembers the binding internally)
 
 ## Project layout
 

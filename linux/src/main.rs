@@ -66,8 +66,9 @@ fn run_transcribe(cfg: Config) -> anyhow::Result<()> {
         .context("resolving whisper model path")?;
     tracing::info!(model = %model_path.display(), "starting transcribe pipeline");
 
-    let pipeline = voice_input::speech::start_pipeline(&model_path, cfg.language_hint.clone())
-        .context("starting speech pipeline")?;
+    let (_capture, pipeline) =
+        voice_input::speech::start_pipeline(&model_path, cfg.language_hint.clone())
+            .context("starting speech pipeline")?;
 
     tracing::info!("listening — speak into the default mic; press Ctrl+C to stop");
 
@@ -100,7 +101,8 @@ fn run_transcribe(cfg: Config) -> anyhow::Result<()> {
         }
     }
 
-    pipeline.join();
+    drop(_capture); // stop audio so VAD thread exits
+    let _ = pipeline.join_remaining(); // drain any final segment we missed
     tracing::info!(
         "pipeline shutdown complete; transcribed {} segments",
         segment_count
@@ -141,6 +143,7 @@ async fn run_listen_async(cfg: Config, model_path: std::path::PathBuf) -> anyhow
     );
 
     let mut current_pipeline: Option<speech::PipelineHandle> = None;
+    let mut current_capture: Option<voice_input::audio::Capture> = None;
     let language_hint = cfg.language_hint.clone();
 
     loop {
@@ -157,17 +160,24 @@ async fn run_listen_async(cfg: Config, model_path: std::path::PathBuf) -> anyhow
                 }
                 tracing::info!("shortcut pressed; starting pipeline");
                 match speech::start_pipeline(&model_path, language_hint.clone()) {
-                    Ok(p) => current_pipeline = Some(p),
+                    Ok((capture, p)) => {
+                        current_capture = Some(capture);
+                        current_pipeline = Some(p);
+                    }
                     Err(e) => tracing::error!(error = %e, "failed to start pipeline"),
                 }
             }
             Some(_deactivated) = deactivated.next() => {
                 if let Some(pipeline) = current_pipeline.take() {
                     tracing::info!("shortcut released; draining and pasting");
-                    // drain_and_join is blocking but cannot use spawn_blocking:
-                    // PipelineHandle is !Send because cpal::Stream is !Send.
-                    // Phase 3 should split Capture drop from thread joins to fix.
-                    let segments = pipeline.drain_and_join();
+                    // Drop Capture first (it's !Send, must stay on this thread)
+                    // — that lets the VAD thread's audio_rx see disconnect.
+                    drop(current_capture.take());
+                    // PipelineHandle is now Send: move it to the blocking pool
+                    // so the join + drain don't stall the async runtime.
+                    let segments = tokio::task::spawn_blocking(move || pipeline.join_remaining())
+                        .await
+                        .context("draining pipeline")?;
                     let joined = segments.join(" ").trim().to_string();
                     if joined.is_empty() {
                         tracing::info!("no segments transcribed; skipping paste");

@@ -13,7 +13,6 @@ pub struct Config {
     pub llm_model: String,
     pub whisper_model_size: String,
     pub whisper_model_path: Option<PathBuf>,
-    pub shortcut_handle: Option<String>,
 }
 
 impl Default for Config {
@@ -26,7 +25,6 @@ impl Default for Config {
             llm_model: "gpt-4o-mini".to_string(),
             whisper_model_size: "small".to_string(),
             whisper_model_path: None,
-            shortcut_handle: None,
         }
     }
 }
@@ -99,7 +97,6 @@ mod tests {
         assert!(!cfg.llm_enabled);
         assert_eq!(cfg.whisper_model_size, "small");
         assert!(cfg.whisper_model_path.is_none());
-        assert!(cfg.shortcut_handle.is_none());
     }
 
     #[test]
