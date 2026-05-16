@@ -70,12 +70,14 @@ pub fn inject_text(text: &str) -> AppResult<()> {
 }
 
 fn snapshot_clipboard() -> AppResult<String> {
-    let (mut pipe, _mime) =
-        get_contents(ClipboardType::Regular, PasteSeat::Unspecified, PasteMime::Text)
-            .map_err(|e| AppError::Config(format!("clipboard snapshot: {e}")))?;
+    let (mut pipe, _mime) = get_contents(
+        ClipboardType::Regular,
+        PasteSeat::Unspecified,
+        PasteMime::Text,
+    )
+    .map_err(|e| AppError::Config(format!("clipboard snapshot: {e}")))?;
     let mut buf = String::new();
-    pipe.read_to_string(&mut buf)
-        .map_err(AppError::Io)?;
+    pipe.read_to_string(&mut buf).map_err(AppError::Io)?;
     Ok(buf)
 }
 

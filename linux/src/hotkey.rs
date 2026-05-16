@@ -1,6 +1,4 @@
-use ashpd::desktop::global_shortcuts::{
-    Activated, Deactivated, GlobalShortcuts, NewShortcut,
-};
+use ashpd::desktop::global_shortcuts::{Activated, Deactivated, GlobalShortcuts, NewShortcut};
 use ashpd::desktop::Session;
 use futures_util::stream::Stream;
 
@@ -29,8 +27,7 @@ impl HotkeyHandle {
             .await
             .map_err(|e| AppError::Config(format!("portal create session: {e}")))?;
 
-        let shortcut = NewShortcut::new(SHORTCUT_ID, "Hold to dictate")
-            .preferred_trigger("CTRL_R");
+        let shortcut = NewShortcut::new(SHORTCUT_ID, "Hold to dictate").preferred_trigger("CTRL_R");
 
         let response = proxy
             .bind_shortcuts(&session, &[shortcut], None, Default::default())

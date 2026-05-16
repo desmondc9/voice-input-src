@@ -109,7 +109,9 @@ fn run_transcribe(cfg: Config) -> anyhow::Result<()> {
 }
 
 fn run_listen(cfg: Config) -> anyhow::Result<()> {
-    let model_path = cfg.resolve_model_path().context("resolving whisper model path")?;
+    let model_path = cfg
+        .resolve_model_path()
+        .context("resolving whisper model path")?;
     tracing::info!(model = %model_path.display(), "starting listen mode");
 
     voice_input::injector::verify_available()
