@@ -11,6 +11,7 @@
 //! `?`. API identical for our usage.
 
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use parking_lot::Mutex;
 use tokio::sync::Notify;
@@ -23,6 +24,10 @@ pub struct AppState {
     config: Arc<Mutex<Config>>,
     pub shutdown: Arc<Notify>,
     pub config_changed: Arc<Notify>,
+    /// True while a speech pipeline is active. Read by the tray to
+    /// switch icon; written by the backend listen loop on pipeline
+    /// start/end. Use Release on the write, Acquire on the read.
+    pub recording: Arc<AtomicBool>,
 }
 
 impl AppState {
@@ -31,6 +36,7 @@ impl AppState {
             config: Arc::new(Mutex::new(cfg)),
             shutdown: Arc::new(Notify::new()),
             config_changed: Arc::new(Notify::new()),
+            recording: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -80,5 +86,26 @@ mod tests {
             guard.enabled = false;
         }
         assert!(!state.snapshot().enabled);
+    }
+
+    #[test]
+    fn recording_flag_defaults_to_false() {
+        let state = AppState::new(Config::default());
+        assert!(
+            !state.recording.load(std::sync::atomic::Ordering::Acquire),
+            "fresh AppState must not report 'recording'"
+        );
+    }
+
+    #[test]
+    fn recording_flag_is_shared_across_clones() {
+        let a = AppState::new(Config::default());
+        let b = a.clone();
+        a.recording
+            .store(true, std::sync::atomic::Ordering::Release);
+        assert!(
+            b.recording.load(std::sync::atomic::Ordering::Acquire),
+            "clones must share the same AtomicBool via Arc"
+        );
     }
 }
