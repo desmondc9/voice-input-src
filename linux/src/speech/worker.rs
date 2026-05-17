@@ -1,8 +1,7 @@
 use std::path::Path;
 use std::sync::Arc;
-use std::thread::{self, JoinHandle};
+use std::thread;
 
-use crossbeam_channel::{Receiver, Sender};
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
 use crate::error::{AppError, AppResult};
@@ -21,48 +20,115 @@ pub fn load_whisper_context(model_path: &Path) -> AppResult<WhisperContext> {
         .map_err(|e| AppError::WhisperFailed(format!("load model {}: {}", path_str, e)))
 }
 
-/// Spawn a worker thread that uses a pre-loaded `WhisperContext` to
-/// transcribe audio slices arriving on `slices_rx`, emitting `String`
-/// segments on `text_tx`. Returns a `JoinHandle` so the caller can join
-/// on shutdown.
-///
-/// `ctx` is shared via `Arc` — multiple successive pipelines reuse the
-/// same loaded model. Per-inference state is created inside the worker.
-///
-/// Errors during per-slice inference are logged and skipped — the worker
-/// keeps running.
-pub fn spawn(
-    ctx: Arc<WhisperContext>,
-    language_hint: String,
-    slices_rx: Receiver<Vec<f32>>,
-    text_tx: Sender<String>,
-) -> AppResult<JoinHandle<()>> {
-    let handle = thread::Builder::new()
-        .name("whisper-worker".into())
-        .spawn(move || run(ctx, language_hint, slices_rx, text_tx))
-        .map_err(|e| AppError::WhisperFailed(format!("spawn worker thread: {}", e)))?;
-
-    Ok(handle)
+/// Long-lived whisper worker that owns a `WhisperState` across many
+/// dictations. Built once at app startup; each dictation calls
+/// `start_session` with fresh per-dictation channels. The worker thread
+/// itself never exits until the user issues `shutdown` (or the cmd
+/// channel is closed).
+pub struct PersistentWhisperWorker {
+    cmd_tx: crossbeam_channel::Sender<WorkerCmd>,
+    handle: Option<thread::JoinHandle<()>>,
 }
 
-fn run(
-    ctx: Arc<WhisperContext>,
-    language_hint: String,
-    slices_rx: Receiver<Vec<f32>>,
-    text_tx: Sender<String>,
-) {
+enum WorkerCmd {
+    Run {
+        language_hint: String,
+        slice_rx: crossbeam_channel::Receiver<Vec<f32>>,
+        text_tx: crossbeam_channel::Sender<String>,
+    },
+    Shutdown,
+}
+
+impl PersistentWhisperWorker {
+    pub fn spawn(ctx: Arc<WhisperContext>) -> AppResult<Self> {
+        let (cmd_tx, cmd_rx) = crossbeam_channel::bounded::<WorkerCmd>(1);
+        let handle = thread::Builder::new()
+            .name("whisper-worker-persistent".into())
+            .spawn(move || run_persistent(ctx, cmd_rx))
+            .map_err(|e| AppError::WhisperFailed(format!("spawn persistent worker: {}", e)))?;
+        Ok(Self {
+            cmd_tx,
+            handle: Some(handle),
+        })
+    }
+
+    /// Enqueue one dictation's worth of inference. Non-blocking: returns
+    /// `WhisperFailed("worker busy")` if a session is already in flight
+    /// (the channel is bounded(1)) instead of parking the caller's
+    /// thread. The current call site in `start_pipeline` is reached via
+    /// the tokio backend's `select!` loop, so blocking here would freeze
+    /// the entire activation/deactivation/shutdown event handling.
+    pub fn start_session(
+        &self,
+        language_hint: String,
+        slice_rx: crossbeam_channel::Receiver<Vec<f32>>,
+        text_tx: crossbeam_channel::Sender<String>,
+    ) -> AppResult<()> {
+        self.cmd_tx
+            .try_send(WorkerCmd::Run {
+                language_hint,
+                slice_rx,
+                text_tx,
+            })
+            .map_err(|e| match e {
+                crossbeam_channel::TrySendError::Full(_) => {
+                    AppError::WhisperFailed("whisper worker busy: session already in flight".into())
+                }
+                crossbeam_channel::TrySendError::Disconnected(_) => {
+                    AppError::WhisperFailed("whisper worker thread exited".into())
+                }
+            })
+    }
+
+    pub fn shutdown(&mut self) {
+        let _ = self.cmd_tx.send(WorkerCmd::Shutdown);
+        if let Some(h) = self.handle.take() {
+            let _ = h.join();
+        }
+    }
+}
+
+impl Drop for PersistentWhisperWorker {
+    fn drop(&mut self) {
+        self.shutdown();
+    }
+}
+
+fn run_persistent(ctx: Arc<WhisperContext>, cmd_rx: crossbeam_channel::Receiver<WorkerCmd>) {
     let mut state = match ctx.create_state() {
         Ok(s) => s,
         Err(e) => {
-            tracing::error!(error = %e, "whisper create_state failed; worker exiting");
+            tracing::error!(error = %e, "persistent whisper worker: create_state failed");
             return;
         }
     };
+    tracing::info!("persistent whisper worker: state ready");
 
-    while let Ok(slice) = slices_rx.recv() {
+    while let Ok(cmd) = cmd_rx.recv() {
+        match cmd {
+            WorkerCmd::Run {
+                language_hint,
+                slice_rx,
+                text_tx,
+            } => {
+                run_session(&mut state, &language_hint, slice_rx, text_tx);
+            }
+            WorkerCmd::Shutdown => break,
+        }
+    }
+    tracing::info!("persistent whisper worker: exiting");
+}
+
+fn run_session(
+    state: &mut whisper_rs::WhisperState,
+    language_hint: &str,
+    slice_rx: crossbeam_channel::Receiver<Vec<f32>>,
+    text_tx: crossbeam_channel::Sender<String>,
+) {
+    while let Ok(slice) = slice_rx.recv() {
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
         if !language_hint.is_empty() {
-            params.set_language(Some(&language_hint));
+            params.set_language(Some(language_hint));
         }
         params.set_print_progress(false);
         params.set_print_special(false);
@@ -81,7 +147,6 @@ fn run(
                 continue;
             }
         };
-
         let mut combined = String::new();
         for i in 0..n_segments {
             match state.full_get_segment_text(i) {
@@ -99,11 +164,11 @@ fn run(
             continue;
         }
         if text_tx.send(trimmed).is_err() {
-            tracing::info!("whisper worker: text channel closed, exiting");
+            tracing::info!("whisper session: text channel closed, exiting session");
             return;
         }
     }
-    tracing::info!("whisper worker: slice channel closed, exiting");
+    tracing::info!("whisper session: slice channel closed, session done");
 }
 
 #[cfg(test)]
@@ -144,16 +209,17 @@ mod tests {
             return;
         }
         let ctx = Arc::new(load_whisper_context(&path).unwrap());
+        let mut worker = PersistentWhisperWorker::spawn(ctx).unwrap();
         let (slices_tx, slices_rx) = crossbeam_channel::bounded(1);
         let (text_tx, text_rx) = crossbeam_channel::bounded(1);
-        let handle = spawn(ctx, "en".into(), slices_rx, text_tx).unwrap();
+        worker.start_session("en".into(), slices_rx, text_tx).unwrap();
 
         let silence = vec![0.0_f32; 16_000 * 3];
         slices_tx.send(silence).unwrap();
+        drop(slices_tx);
 
         let _ = text_rx.recv_timeout(std::time::Duration::from_secs(30));
-        drop(slices_tx);
-        handle.join().unwrap();
+        worker.shutdown();
     }
 
     fn dirs_for_test() -> PathBuf {

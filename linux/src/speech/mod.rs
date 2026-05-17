@@ -15,11 +15,9 @@
 pub mod vad;
 pub mod worker;
 
-use std::sync::Arc;
 use std::thread::JoinHandle;
 
 use crossbeam_channel::{bounded, Receiver};
-use whisper_rs::WhisperContext;
 
 use crate::audio::{AudioChunk, Capture, Resampler16kMono};
 use crate::error::{AppError, AppResult};
@@ -36,13 +34,14 @@ use crate::error::{AppError, AppResult};
 pub struct PipelineHandle {
     pub text_rx: Receiver<String>,
     vad_handle: Option<JoinHandle<()>>,
-    whisper_handle: Option<JoinHandle<()>>,
 }
 
 impl PipelineHandle {
-    /// Join the worker threads. Drains `text_rx` after joins return —
-    /// at that point all senders have been dropped, so `try_recv` yields
-    /// every buffered segment exactly once.
+    /// Join the vad thread, then drain `text_rx`.
+    ///
+    /// VAD dropping `slice_tx` signals the persistent whisper worker's
+    /// session loop to exit, which causes `text_tx` to be dropped, which
+    /// terminates the `text_rx` recv loop below.
     ///
     /// IMPORTANT: the caller must drop the corresponding `Capture` BEFORE
     /// calling this (typically via `drop(capture)` on the async thread,
@@ -53,11 +52,10 @@ impl PipelineHandle {
         if let Some(h) = self.vad_handle.take() {
             let _ = h.join();
         }
-        if let Some(h) = self.whisper_handle.take() {
-            let _ = h.join();
-        }
+        // VAD dropped slice_tx → persistent whisper worker's session
+        // loop exits → drops text_tx → recv loop here terminates.
         let mut out = Vec::new();
-        while let Ok(seg) = self.text_rx.try_recv() {
+        while let Ok(seg) = self.text_rx.recv() {
             out.push(seg);
         }
         out
@@ -66,14 +64,11 @@ impl PipelineHandle {
 
 impl Drop for PipelineHandle {
     fn drop(&mut self) {
-        // If `join_remaining` wasn't called, ensure threads still get joined
-        // on Drop. This won't deadlock as long as the corresponding Capture
-        // has been dropped — if it hasn't, the caller has a bug and will
-        // see this hang in their logs.
+        // If `join_remaining` wasn't called, ensure the thread still gets
+        // joined on Drop. This won't deadlock as long as the corresponding
+        // Capture has been dropped — if it hasn't, the caller has a bug
+        // and will see this hang in their logs.
         if let Some(h) = self.vad_handle.take() {
-            let _ = h.join();
-        }
-        if let Some(h) = self.whisper_handle.take() {
             let _ = h.join();
         }
     }
@@ -87,7 +82,7 @@ impl Drop for PipelineHandle {
 /// are forwarded via `try_send` (levels are lossy; dropped if the consumer
 /// is slow).
 pub fn start_pipeline(
-    whisper_ctx: Arc<WhisperContext>,
+    whisper_worker: &worker::PersistentWhisperWorker,
     language_hint: String,
     level_tx: Option<crossbeam_channel::Sender<f32>>,
 ) -> AppResult<(Capture, PipelineHandle)> {
@@ -106,14 +101,15 @@ pub fn start_pipeline(
         })
         .map_err(|e| AppError::Config(format!("spawn vad thread: {}", e)))?;
 
-    let whisper_handle = worker::spawn(whisper_ctx, language_hint, slice_rx, text_tx)?;
+    whisper_worker.start_session(language_hint, slice_rx, text_tx)?;
 
-    let handle = PipelineHandle {
-        text_rx,
-        vad_handle: Some(vad_handle),
-        whisper_handle: Some(whisper_handle),
-    };
-    Ok((capture, handle))
+    Ok((
+        capture,
+        PipelineHandle {
+            text_rx,
+            vad_handle: Some(vad_handle),
+        },
+    ))
 }
 
 fn run_vad_resample(
