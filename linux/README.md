@@ -2,7 +2,7 @@
 
 Wayland-native voice input for KDE Plasma 6, sway, and hyprland. Hold a configured key, speak, release — the transcript is pasted into the focused application.
 
-> Status: **Phase 5** — tray menu (Enabled / Language / LLM Refinement → Settings dialog) replaces manual TOML editing. Default invocation (`voice-input`) launches the full app — tray + hotkey + overlay + LLM refinement — in one process. Headless `transcribe` CLI still works.
+> Status: **Phase 6** — tray icon now reflects pipeline state (`media-record-symbolic` while dictating, `audio-input-microphone` idle), matching the macOS `mic`/`mic.fill` parity. Phase 5 features (Settings dialog, Enabled / Language / LLM Refinement submenus, unified default mode) remain. Headless `transcribe` CLI still works.
 
 > **Phase 3 GNOME note**: the overlay uses `wlr-layer-shell`, which GNOME's mutter does NOT implement. `voice-input listen` will fail to position the capsule correctly on GNOME — explicitly out of scope.
 
@@ -85,6 +85,8 @@ Requires the steps in "Install ydotool" above.
 ### Overlay capsule (Phase 3)
 
 When you hold the configured shortcut, a small dark capsule appears at the bottom-center of your screen with an animated 5-bar waveform that tracks your speaking volume. When you release, the capsule briefly shows "Refining…" then disappears as the text is pasted.
+
+The tray icon switches to a red **record** glyph (`media-record-symbolic`) while audio is being captured, and reverts to the microphone glyph the moment you release the hotkey. The overlay capsule continues to show "Refining…" while the LLM is processing, so you can tell capture-vs-refinement apart at a glance.
 
 Requires `wlr-layer-shell` support in your compositor:
 - **KDE Plasma 6**: works (KWin 6+ supports it).
