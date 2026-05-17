@@ -212,7 +212,9 @@ mod tests {
         let mut worker = PersistentWhisperWorker::spawn(ctx).unwrap();
         let (slices_tx, slices_rx) = crossbeam_channel::bounded(1);
         let (text_tx, text_rx) = crossbeam_channel::bounded(1);
-        worker.start_session("en".into(), slices_rx, text_tx).unwrap();
+        worker
+            .start_session("en".into(), slices_rx, text_tx)
+            .unwrap();
 
         let silence = vec![0.0_f32; 16_000 * 3];
         slices_tx.send(silence).unwrap();

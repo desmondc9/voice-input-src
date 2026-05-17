@@ -83,9 +83,7 @@ impl Drop for PipelineHandle {
 /// is slow).
 pub fn start_pipeline(
     whisper_worker: &worker::PersistentWhisperWorker,
-    vad_detector: std::sync::Arc<
-        std::sync::Mutex<voice_activity_detector::VoiceActivityDetector>,
-    >,
+    vad_detector: std::sync::Arc<std::sync::Mutex<voice_activity_detector::VoiceActivityDetector>>,
     language_hint: String,
     level_tx: Option<crossbeam_channel::Sender<f32>>,
 ) -> AppResult<(Capture, PipelineHandle)> {
@@ -128,9 +126,7 @@ fn run_vad_resample(
     input_rate: u32,
     input_channels: u16,
     level_tx: Option<crossbeam_channel::Sender<f32>>,
-    vad_detector: std::sync::Arc<
-        std::sync::Mutex<voice_activity_detector::VoiceActivityDetector>,
-    >,
+    vad_detector: std::sync::Arc<std::sync::Mutex<voice_activity_detector::VoiceActivityDetector>>,
 ) {
     let mut resampler = match Resampler16kMono::new(input_rate, input_channels) {
         Ok(r) => r,
