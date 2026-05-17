@@ -106,7 +106,7 @@ llm_api_key = "sk-..."
 llm_model = "gpt-4o-mini"
 ~~~
 
-The `llm_api_base_url` accepts any OpenAI-compatible endpoint (Ollama, vLLM, llama.cpp server, Together, Groq, etc.). The 10 s request timeout matches the macOS app. A future Settings UI (Phase 5) will replace manual TOML editing.
+The `llm_api_base_url` accepts any OpenAI-compatible endpoint (Ollama, vLLM, llama.cpp server, Together, Groq, etc.). The request timeout defaults to 30 s (override via `llm_timeout_secs`). Manual TOML editing is no longer required — use the **LLM Refinement → Settings…** dialog from the tray (Phase 5).
 
 #### Ollama (local) example
 
@@ -163,4 +163,4 @@ rm ~/.config/autostart/voice-input.desktop
 
 ## Project layout
 
-See `../plans/voice-input-linux.md` for the full design and `../implementation/` for per-phase implementation plans.
+See `../plans/2026-05-15-voice-input-linux/voice-input-linux.md` for the full design and `../plans/2026-05-15-voice-input-linux/implementations/` for per-phase implementation plans (Phase 0 through Phase 7).
