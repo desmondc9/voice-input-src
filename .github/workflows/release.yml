@@ -1,0 +1,71 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build-cpu:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.83"
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-4-dev libwayland-dev cmake clang libclang-dev libasound2-dev
+      - name: Install cargo-deb
+        run: cargo install cargo-deb --locked
+      - name: Build CPU .deb
+        working-directory: linux
+        run: cargo deb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb-cpu
+          path: linux/target/debian/voice-input_*.deb
+
+  build-cuda:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.83"
+      - name: Install build deps (incl. CUDA toolkit)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-4-dev libwayland-dev cmake clang libclang-dev libasound2-dev nvidia-cuda-toolkit
+      - name: Install cargo-deb
+        run: cargo install cargo-deb --locked
+      - name: Build CUDA .deb
+        working-directory: linux
+        run: cargo deb --variant cuda
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb-cuda
+          path: linux/target/debian/voice-input-cuda_*.deb
+
+  release:
+    needs: [build-cpu, build-cuda]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/deb-cpu/voice-input_*.deb
+            artifacts/deb-cuda/voice-input-cuda_*.deb
+          generate_release_notes: true
+          draft: false
+          prerelease: false
