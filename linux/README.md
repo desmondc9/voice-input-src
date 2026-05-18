@@ -2,9 +2,31 @@
 
 Wayland-native voice input for KDE Plasma 6, sway, and hyprland. Hold a configured key, speak, release — the transcript is pasted into the focused application.
 
-> Status: **Phase 7** — latency polish (persistent whisper + VAD workers, VAD silence cutoff 150 ms) plus XDG autostart installer. Phase 6 recording icon, Phase 5 tray menus, headless `transcribe` CLI all unchanged.
+> Status: **v0.1.0 released** — first Linux release. Download the [latest `.deb`](https://github.com/desmondc9/voice-input-src/releases/latest), or build from source (instructions below).
 
 > **Phase 3 GNOME note**: the overlay uses `wlr-layer-shell`, which GNOME's mutter does NOT implement. `voice-input listen` will fail to position the capsule correctly on GNOME — explicitly out of scope.
+
+## Install
+
+**Recommended:** download the latest `.deb` from the [GitHub Releases page](https://github.com/desmondc9/voice-input-src/releases/latest) and install with `apt`.
+
+```bash
+# CPU build (any Linux, no GPU required):
+wget https://github.com/desmondc9/voice-input-src/releases/download/v0.1.0/voice-input_0.1.0_amd64.deb
+sudo apt install ./voice-input_0.1.0_amd64.deb
+
+# NVIDIA GPU users — faster transcription via CUDA:
+wget https://github.com/desmondc9/voice-input-src/releases/download/v0.1.0/voice-input-cuda_0.1.0_amd64.deb
+sudo apt install ./voice-input-cuda_0.1.0_amd64.deb
+```
+
+After install, three one-time setup steps:
+
+1. **Download a whisper model** — see [Download a whisper model](#download-a-whisper-model) below.
+2. **Install and start `ydotoold`** — see [Install ydotool](#install-ydotool-for-listen-mode-only) below. (Package `ydotool-daemon` is recommended by both `.deb`s so it should already be present; the section explains how to enable the systemd user service.)
+3. **Bind a global shortcut on first launch** — the app registers a portal global shortcut. Open your desktop's Global Shortcuts settings (KDE: System Settings → Shortcuts → Global Shortcuts) and assign a key to `voice-input → Hold to dictate`.
+
+Then run `voice-input` to start the tray app.
 
 ## Build
 
@@ -16,6 +38,18 @@ cargo build --release
 ```
 
 System packages (Debian/Ubuntu): `sudo apt install cmake clang libclang-dev libasound2-dev`.
+
+### Optional: CUDA acceleration
+
+The default build is CPU-only and requires no special toolkit. For NVIDIA GPU acceleration:
+
+```bash
+sudo apt install nvidia-cuda-toolkit
+cd linux
+cargo build --release --features cuda
+```
+
+The CUDA-enabled binary is 5–15× faster on RTX-class GPUs (e.g. 3 s → 200 ms for a 5-second utterance with `large-v3-turbo`). It links against `libcudart` and `libcublas` at runtime.
 
 ## Download a whisper model
 
