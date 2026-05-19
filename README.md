@@ -1,4 +1,4 @@
-# VoiceInput (Linux)
+# VoiceInput
 
 Wayland-native voice input for KDE Plasma 6, sway, and hyprland. Hold a configured key, speak, release — the transcript is pasted into the focused application.
 
@@ -33,7 +33,6 @@ Then run `voice-input` to start the tray app.
 Requires Rust 1.83+, `cmake`, `libclang`, and `cc`/`gcc`. On first build, whisper.cpp compiles from source (≈30–60 s).
 
 ```bash
-cd linux
 cargo build --release
 ```
 
@@ -45,7 +44,6 @@ The default build is CPU-only and requires no special toolkit. For NVIDIA GPU ac
 
 ```bash
 sudo apt install nvidia-cuda-toolkit
-cd linux
 cargo build --release --features cuda
 ```
 
@@ -166,13 +164,13 @@ llm_timeout_secs = 30  # optional; default 30. Bump higher for slow cold-starts 
 Run once to install a `~/.config/autostart/voice-input.desktop` entry that launches the tray at login:
 
 ```bash
-./linux/scripts/install-autostart.sh
+./scripts/install-autostart.sh
 ```
 
-The script picks `voice-input` from your `$PATH`, or falls back to `linux/target/release/voice-input`. Pass an explicit path if you want a different binary:
+The script picks `voice-input` from your `$PATH`, or falls back to `target/release/voice-input`. Pass an explicit path if you want a different binary:
 
 ```bash
-./linux/scripts/install-autostart.sh /usr/local/bin/voice-input
+./scripts/install-autostart.sh /usr/local/bin/voice-input
 ```
 
 Remove with:
@@ -261,4 +259,12 @@ voice-input &!
 
 ## Project layout
 
-See `../plans/2026-05-15-voice-input-linux/voice-input-linux.md` for the full design and `../plans/2026-05-15-voice-input-linux/implementations/` for per-phase implementation plans (Phase 0 through Phase 7).
+See `plans/2026-05-15-voice-input-linux/voice-input-linux.md` for the full design and `plans/2026-05-15-voice-input-linux/implementations/` for per-phase implementation plans (Phase 0 through Phase 7).
+
+## Credits
+
+Inspired by [yetone/voice-input-src](https://github.com/yetone/voice-input-src),
+a Fn-key-driven voice input app for macOS. This project is a from-scratch
+Linux reimplementation in Rust targeting Wayland compositors — none of the
+original Swift code is included, but the UX shape (hold-to-talk capsule
+overlay + LLM refinement) traces back to that work.
